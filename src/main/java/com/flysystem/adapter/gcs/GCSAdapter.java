@@ -128,6 +128,9 @@ public class GCSAdapter extends AbstractAdapter
 		 */
 		public Builder setClient(Storage client) {
 			adapter.client = client;
+			adapter.applicationName = client.getApplicationName();
+			adapter.jsonFactory = client.getJsonFactory();
+			adapter.httpTransport = client.getRequestFactory().getTransport();
 			return this;
 		}
 
