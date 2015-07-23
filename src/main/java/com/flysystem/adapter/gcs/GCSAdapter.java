@@ -30,15 +30,21 @@ import com.flysystem.core.adapter.AbstractAdapter;
 import com.flysystem.core.exception.FileExistsException;
 import com.flysystem.core.exception.FileNotFoundException;
 import com.flysystem.core.exception.FlysystemGenericException;
+import com.flysystem.core.util.PathUtil;
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.HttpTransport;
+import com.google.api.client.http.InputStreamContent;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.StorageScopes;
+import com.google.api.services.storage.model.Bucket;
+import com.google.api.services.storage.model.StorageObject;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
@@ -113,34 +119,47 @@ public class GCSAdapter extends AbstractAdapter
 			return this;
 		}
 
+		/**
+		 * This method should not be used in regular use cases.
+		 * Setting the client yourself is useful when for example you want to use a different authentication mechanism than service accounts.
+		 * When the client is set, no other properties are required to be set any longer.
+		 * @param client
+		 * @return
+		 */
+		public Builder setClient(Storage client) {
+			adapter.client = client;
+			return this;
+		}
+
 		private void withDefaults()
 		{
-			try {
-				if (adapter.httpTransport == null) setHttpTransport(GoogleNetHttpTransport.newTrustedTransport());
-			} catch (GeneralSecurityException | IOException e) {
-				throw new FlysystemGenericException(e);
+			if (adapter.httpTransport == null) {
+				try {
+					setHttpTransport(GoogleNetHttpTransport.newTrustedTransport());
+				} catch (GeneralSecurityException | IOException e) {
+					throw new FlysystemGenericException(e);
+				}
 			}
 			if (adapter.jsonFactory == null) setJsonFactory(JacksonFactory.getDefaultInstance());
+
+			if (adapter.client == null) {
+				try {
+					adapter.client = new Storage.Builder(adapter.httpTransport, adapter.jsonFactory, adapter.authorize())
+							.setApplicationName(adapter.applicationName).build();
+				} catch (IOException e) {
+					throw new FlysystemGenericException(e);
+				}
+			}
 		}
 
 		public GCSAdapter build()
 		{
+			if (adapter.bucketName == null && adapter.client == null) throw new GCSConnectionException("Bucket name has to be provided.");
+			if (adapter.serviceAccountEmail == null && adapter.client == null) throw new GCSConnectionException("Service account email has to be provided.");
+			if (adapter.p12Key == null && adapter.client == null) throw new GCSConnectionException("A .p12 key has to be provided.");
+			if (adapter.applicationName == null && adapter.client == null) logger.warning("You didn't set your Application name. GCS will log warning messages because of this! Suggested format is \"MyCompany-ProductName/1.0\".");
 			withDefaults();
-			if (adapter.bucketName == null) throw new GCSConnectionException("Bucket name has to be provided.");
-			if (adapter.serviceAccountEmail == null) throw new GCSConnectionException("Service account email has to be provided.");
-			if (adapter.p12Key == null) throw new GCSConnectionException("A .p12 key has to be provided.");
-			if (adapter.applicationName == null) logger.warning("You didn't set your Application name. GCS will log warning messages because of this! Suggested format is \"MyCompany-ProductName/1.0\".");
-			adapter.initialize();
 			return adapter;
-		}
-	}
-
-	private void initialize()
-	{
-		try {
-			client = new Storage.Builder(httpTransport, jsonFactory, authorize()).setApplicationName(applicationName).build();
-		} catch (IOException e) {
-			throw new FlysystemGenericException(e);
 		}
 	}
 
@@ -165,7 +184,15 @@ public class GCSAdapter extends AbstractAdapter
 
 	public String read(String path) throws FileNotFoundException
 	{
-		return null;
+		try {
+			Storage.Objects.Get execute = client.objects().get(bucketName, path);
+			ByteArrayOutputStream out = new ByteArrayOutputStream();
+			execute.getMediaHttpDownloader().setDirectDownloadEnabled(true);
+			execute.executeMediaAndDownloadTo(out);
+			return out.toString();
+		} catch (IOException e) {
+			throw new FlysystemGenericException(e);
+		}
 	}
 
 	public List<FileMetadata> listContents(String directory, boolean recursive)
@@ -180,17 +207,17 @@ public class GCSAdapter extends AbstractAdapter
 
 	public Long getSize(String path)
 	{
-		return null;
+		return getObject(path).getSize().longValue();
 	}
 
 	public String getMimetype(String path)
 	{
-		return null;
+		return getObject(path).getContentType();
 	}
 
 	public Long getTimestamp(String path)
 	{
-		return null;
+		return getObject(path).getUpdated().getValue();
 	}
 
 	public Visibility getVisibility(String path)
@@ -205,7 +232,16 @@ public class GCSAdapter extends AbstractAdapter
 
 	public boolean write(String path, String contents)
 	{
-		return false;
+		try {
+			StorageObject object = new StorageObject();
+			object.setContentType(PathUtil.guessMimeType(path));
+			InputStreamContent mediaContent = new InputStreamContent("application/octet-stream", new ByteArrayInputStream(contents.getBytes()));
+			mediaContent.setLength(contents.length());
+			client.objects().insert(bucketName, object, mediaContent);
+			return true;
+		} catch (IOException e) {
+			throw new FlysystemGenericException(e);
+		}
 	}
 
 	public boolean update(String path, String contents)
@@ -225,12 +261,18 @@ public class GCSAdapter extends AbstractAdapter
 
 	public boolean copy(String path, String newpath)
 	{
-		return false;
+//		client.objects().copy(bucketName, path, bucketName, newpath).execute();
+		return true;
 	}
 
 	public boolean delete(String path)
 	{
-		return false;
+		try {
+			client.objects().delete(bucketName, path);
+		} catch (IOException e) {
+			throw new FlysystemGenericException(e);
+		}
+		return true;
 	}
 
 	public boolean deleteDir(String dirname)
@@ -251,5 +293,24 @@ public class GCSAdapter extends AbstractAdapter
 	public boolean setVisibility(String path, Visibility visibility)
 	{
 		return false;
+	}
+
+	private Bucket getBucket()
+	{
+		try {
+			Bucket execute = client.buckets().get(bucketName).execute();
+			return execute;
+		} catch (IOException e) {
+			throw new FlysystemGenericException(e);
+		}
+	}
+
+	private StorageObject getObject(String path)
+	{
+		try {
+			return client.objects().get(bucketName, path).execute();
+		} catch (IOException e) {
+			throw new FlysystemGenericException(e);
+		}
 	}
 }

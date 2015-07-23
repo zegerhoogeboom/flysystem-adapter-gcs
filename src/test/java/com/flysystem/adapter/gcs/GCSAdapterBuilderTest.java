@@ -41,6 +41,7 @@ import static junit.framework.TestCase.assertEquals;
 import static org.junit.Assert.assertThat;
 
 /**
+ * todo test the setClient();
  * @author Zeger Hoogeboom
  */
 public class GCSAdapterBuilderTest
