@@ -22,19 +22,34 @@
 
 package com.flysystem.adapter.gcs;
 
+import com.google.api.client.googleapis.media.MediaHttpDownloader;
+import com.google.api.client.http.HttpRequestFactory;
+import com.google.api.client.http.HttpTransport;
+import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.storage.Storage;
+import org.apache.commons.io.IOUtils;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Matchers;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
+import static junit.framework.TestCase.assertEquals;
+import static org.mockito.Matchers.anyString;
+import static org.mockito.Mockito.when;
+import static org.powermock.api.mockito.PowerMockito.mock;
+import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
 /**
  * @author Zeger Hoogeboom
  */
+@RunWith(PowerMockRunner.class)
+@PrepareForTest({MediaHttpDownloader.class, Storage.Objects.Get.class, Storage.class, HttpRequestFactory.class, JacksonFactory.class, IOUtils.class})
 public class GCSAdapterTest
 {
 	GCSAdapter adapter;
@@ -42,29 +57,54 @@ public class GCSAdapterTest
 	Storage mockedClient;
 	String bucketName;
 	String path;
+	HttpTransport mockedTransport;
+	Storage.Objects objectsMock;
 
 	@Before
 	public void setUp() throws Exception
 	{
 		bucketName = "test";
-		bucketName = "file.txt";
+		path = "file.txt";
 		p12 = new File(System.getProperty("user.dir")+"/src/test/files/key.p12");
-		mockedClient = mock(Storage.class);
+
+		mockStatic(IOUtils.class);
+		setupMockedClient();
 		adapter = new GCSAdapter.Builder()
-//				.setClient(mockedClient)
+				.setClient(mockedClient)
 				.setBucket("ornate-shine-613")
-				.setP12Key(p12)
-				.setServiceAccountEmail("882658829069-ea7q6h3fng1a8aa1gjb1eapifud9bkjv@developer.gserviceaccount.com")
 				.build();
+	}
+
+	private void setupMockedClient()
+	{
+		mockedClient = mock(Storage.class);
+		objectsMock = mock(Storage.Objects.class);
+		mockedTransport = mock(HttpTransport.class);
+
+		when(mockedClient.objects()).thenReturn(objectsMock);
+		when(mockedClient.getJsonFactory()).thenReturn(mock(JacksonFactory.class));
+
+		HttpRequestFactory mockedRequestFactory = mock(HttpRequestFactory.class); //setClient() uses this to retrieve the http transport
+		when(mockedRequestFactory.getTransport()).thenReturn(mockedTransport);
+		when(mockedClient.getRequestFactory()).thenReturn(mockedRequestFactory);
 	}
 
 	@Test
 	public void read() throws IOException
 	{
-		Storage.Objects.Get mock = mock(Storage.Objects.Get.class);
-//		when(mockedClient.objects().get(bucketName, path)).thenReturn(mock);
-//		String read = adapter.read("godviavideo.txt");
-//		assertNull(read);
-		assertTrue(true);
+		Storage.Objects.Get getMock = mock(Storage.Objects.Get.class);
+		MediaHttpDownloader httpMock = mock(MediaHttpDownloader.class);
+		InputStream streamMock = mock(InputStream.class);
+
+		when(getMock.getMediaHttpDownloader()).thenReturn(httpMock);
+		when(getMock.executeMediaAsInputStream()).thenReturn(streamMock);
+		when(objectsMock.get(anyString(), anyString())).thenReturn(getMock);
+		when(httpMock.setDirectDownloadEnabled(true)).thenReturn(httpMock);
+		when(IOUtils.toString(Matchers.<InputStream>any(), Matchers.<String>any())).thenReturn("contents");
+
+		String read = adapter.read(path);
+		assertEquals("contents", read);
 	}
+
+
 }

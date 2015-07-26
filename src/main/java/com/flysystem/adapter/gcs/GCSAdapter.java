@@ -42,11 +42,12 @@ import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.StorageScopes;
 import com.google.api.services.storage.model.Bucket;
 import com.google.api.services.storage.model.StorageObject;
+import org.apache.commons.io.IOUtils;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
@@ -189,13 +190,17 @@ public class GCSAdapter extends AbstractAdapter
 	{
 		try {
 			Storage.Objects.Get execute = client.objects().get(bucketName, path);
-			ByteArrayOutputStream out = new ByteArrayOutputStream();
 			execute.getMediaHttpDownloader().setDirectDownloadEnabled(true);
-			execute.executeMediaAndDownloadTo(out);
-			return out.toString();
+			InputStream stream = execute.executeMediaAsInputStream();
+			return IOUtils.toString(stream, "UTF-8");
 		} catch (IOException e) {
 			throw new FlysystemGenericException(e);
 		}
+	}
+
+	private String readInputStream(InputStream stream)
+	{
+	   return null;
 	}
 
 	public List<FileMetadata> listContents(String directory, boolean recursive)
