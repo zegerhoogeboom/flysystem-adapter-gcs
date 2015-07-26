@@ -30,7 +30,6 @@ import com.flysystem.core.adapter.AbstractAdapter;
 import com.flysystem.core.exception.FileExistsException;
 import com.flysystem.core.exception.FileNotFoundException;
 import com.flysystem.core.exception.FlysystemGenericException;
-import com.flysystem.core.util.PathUtil;
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
@@ -183,7 +182,12 @@ public class GCSAdapter extends AbstractAdapter
 
 	public boolean has(String path)
 	{
-		return false;
+		try {
+			Storage.Objects.Get get = client.objects().get(bucketName, path);
+			return get.execute() != null;
+		} catch (IOException e) {
+			return false;
+		}
 	}
 
 	public String read(String path) throws FileNotFoundException
@@ -198,13 +202,14 @@ public class GCSAdapter extends AbstractAdapter
 		}
 	}
 
-	private String readInputStream(InputStream stream)
-	{
-	   return null;
-	}
-
 	public List<FileMetadata> listContents(String directory, boolean recursive)
 	{
+		try {
+			List<StorageObject> execute = client.objects().list(bucketName).execute().getItems();
+			return StorageObjectConverter.doConvert(execute);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 		return null;
 	}
 
@@ -242,10 +247,12 @@ public class GCSAdapter extends AbstractAdapter
 	{
 		try {
 			StorageObject object = new StorageObject();
-			object.setContentType(PathUtil.guessMimeType(path));
-			InputStreamContent mediaContent = new InputStreamContent("application/octet-stream", new ByteArrayInputStream(contents.getBytes()));
-			mediaContent.setLength(contents.length());
-			client.objects().insert(bucketName, object, mediaContent);
+			object.setBucket(bucketName);
+			InputStreamContent mediaContent = new InputStreamContent("text/plain", new ByteArrayInputStream(contents.getBytes()))
+				.setLength(contents.length());
+			client.objects().insert(bucketName, object, mediaContent)
+					.setName(path)
+					.execute();
 			return true;
 		} catch (IOException e) {
 			throw new FlysystemGenericException(e);
@@ -269,14 +276,18 @@ public class GCSAdapter extends AbstractAdapter
 
 	public boolean copy(String path, String newpath)
 	{
-//		client.objects().copy(bucketName, path, bucketName, newpath).execute();
-		return true;
+		try {
+			client.objects().copy(bucketName, path, bucketName, newpath, new StorageObject()).execute();
+			return true;
+		} catch (IOException e) {
+			return false;
+		}
 	}
 
 	public boolean delete(String path)
 	{
 		try {
-			client.objects().delete(bucketName, path);
+			client.objects().delete(bucketName, path).execute();
 		} catch (IOException e) {
 			throw new FlysystemGenericException(e);
 		}

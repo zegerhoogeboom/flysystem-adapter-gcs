@@ -46,6 +46,7 @@ import static org.powermock.api.mockito.PowerMockito.mock;
 import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
 /**
+ * todo delete this?
  * @author Zeger Hoogeboom
  */
 @RunWith(PowerMockRunner.class)
